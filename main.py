@@ -1,6 +1,7 @@
 import datetime
 from dateutil.relativedelta import relativedelta
 import pandas as pd
+import sys
 
 def diff_month(d1, d2):
     return (d1.year - d2.year) * 12 + d1.month - d2.month
@@ -77,6 +78,71 @@ print(usd_por_cuota_mensual.to_string())
 print("zed_ops_by_cohort_full")
 print(zed_ops_by_cohort_full.to_string())
 
+print("zed_ops_net_by_client_compras")
+zed_ops_net_by_client_compras = zed_ops_net_by_client[zed_ops_net_by_client["cuotas"] >= 0]
+print(zed_ops_net_by_client_compras.to_string())
+print("zed_ops_net_by_client_ventas")
+zed_ops_net_by_client_ventas = zed_ops_net_by_client[zed_ops_net_by_client["cuotas"] < 0]
+print(zed_ops_net_by_client_ventas.to_string())
+
+
+nro_de_cohortes = zed_ops["cohorte"].max()
+"""
+target_customer_id = "73203092"
+
+print("this_clients_buy_pos")
+this_clients_buy_pos = zed_ops_net_by_client_compras[zed_ops_net_by_client_compras["id"] == target_customer_id]
+print(this_clients_buy_pos.to_string())
+
+print("this_clients_sell_pos")
+this_clients_sell_pos = zed_ops_net_by_client_ventas[zed_ops_net_by_client_ventas["id"] == target_customer_id]
+this_clients_sell_pos = this_clients_sell_pos[this_clients_sell_pos["cohorte"] <= 12]
+print(this_clients_sell_pos.to_string())
+"""
+
+def get_net_client_portfolios_by_date(compras_by_client_df, ventas_by_client_df, nro_cohorte):
+    zed_ops_net_by_client_compras = compras_by_client_df[compras_by_client_df["cohorte"] <= nro_cohorte]
+    zed_ops_net_by_client_ventas = ventas_by_client_df[ventas_by_client_df["cohorte"] <= nro_cohorte]
+    # Filtrar zed_ops_net_by_client_ventas hasta la fecha correspondiente cada vez
+    for i, row_i in zed_ops_net_by_client_ventas.iterrows():
+        this_clients_buy_pos = zed_ops_net_by_client_compras[zed_ops_net_by_client_compras["id"] == row_i["id"]]
+        this_clients_buy_pos = this_clients_buy_pos[this_clients_buy_pos["cohorte"] <= row_i["cohorte"]]
+        sell_pos = -row_i["cuotas"]
+        for j, row_j in this_clients_buy_pos.iterrows():
+            if not sell_pos:
+                break
+            if row_j["cuotas"] >= sell_pos:
+                this_clients_buy_pos.loc[j, "cuotas"] = this_clients_buy_pos.loc[j, "cuotas"] - sell_pos
+                sell_pos = 0
+            else:
+                this_clients_buy_pos.loc[j, "cuotas"] = 0
+                sell_pos -= row_j["cuotas"]
+
+        for k, row in this_clients_buy_pos.iterrows():
+            zed_ops_net_by_client_compras.loc[
+                (zed_ops_net_by_client_compras["id"] == row["id"]) & (zed_ops_net_by_client_compras["cohorte"] == row["cohorte"]),
+                "cuotas"
+            ] = row["cuotas"]
+
+    return zed_ops_net_by_client_compras
+
+
+all_client_portfolios_by_date = pd.DataFrame(columns=["id", "cohorte", "cuotas", "cuotas_neto", "fecha_obs"])
+for i in range(1, nro_de_cohortes + 1):
+    these_portfolios = get_net_client_portfolios_by_date(zed_ops_net_by_client_compras, zed_ops_net_by_client_ventas, i)
+    these_portfolios.loc[:, "fecha_obs"] = i + 2
+    all_client_portfolios_by_date = pd.concat([all_client_portfolios_by_date, these_portfolios])
+all_client_portfolios_by_date = all_client_portfolios_by_date[["fecha_obs", "id", "cohorte", "cuotas", "cuotas_neto"]]
+
+print("all_client_portfolios_by_date")
+all_client_portfolios_by_date.rename(columns={"fecha_obs": "nro_fecha"}, inplace=True)
+#all_client_portfolios_by_date = all_client_portfolios_by_date[all_client_portfolios_by_date["nro_fecha"] == 15]
+print(all_client_portfolios_by_date.head(500).to_string())
+
+#zed_ops_net_by_client_compras = zed_ops_net_by_client_compras[zed_ops_net_by_client_compras["id"] == target_customer_id]
+print("zed_ops_net_by_client_compras_nuevo")
+print(zed_ops_net_by_client_compras.to_string())
+
 cohorts_2 = {}
 for index, row in zed_ops_by_cohort_full.iterrows():
     cohorts_2[row["cohorte"]] = {
@@ -96,14 +162,15 @@ for i in range(len(pay_dates_2)):
 
 tabla_2 = pd.DataFrame(columns=["nro_fecha", "fecha", "cohorte", "usd_x_cuota", "usd_x_cuota_acum", "nro_cuotas", "paga", "desembolso"])
 
+# Hacer esto para nivel cohorte: nro_fecha, date,"usd_x_cuota", "usd_x_cuota_acum", paga]
 nro_fecha = 1
 for date in pay_dates_2:
     for id in cohorts_2.keys():
-        if date > cohorts_2[id]["fecha_entrada"] + relativedelta(months=3):
+        if date > cohorts_2[id]["fecha_entrada"] + relativedelta(months=2):
             meses_transcurridos = diff_month(date, cohorts_2[id]["fecha_entrada"])
             paga = meses_transcurridos % 3 == 0
-            print(date)
-            print(usd_por_cuota_mensual.loc[usd_por_cuota_mensual['fecha'] == date, 'usd_por_cuota'].iloc[0])
+            #print(date)
+            #print(usd_por_cuota_mensual.loc[usd_por_cuota_mensual['fecha'] == date, 'usd_por_cuota'].iloc[0])
             cohorts_2[id]["usd_x_cuota"] = usd_por_cuota_mensual.loc[usd_por_cuota_mensual['fecha'] == date, 'usd_por_cuota'].iloc[0]
             cohorts_2[id]["usd_x_cuota_acum"] += cohorts_2[id]["usd_x_cuota"]
             desembolso = cohorts_2[id]["usd_x_cuota_acum"] * cohorts_2[id]["nro_cuotas"] * paga
@@ -111,9 +178,22 @@ for date in pay_dates_2:
                                          cohorts_2[id]["nro_cuotas"], paga, desembolso]
             if paga:
                 cohorts_2[id]["usd_x_cuota_acum"] = 0
+
+            # cohorts_2[id]["usd_x_cuota"], cohorts_2[id]["usd_x_cuota_acum"], cohorts_2[id]["nro_cuotas"]
     nro_fecha += 1
 print(f"desembolso_por_cohorte (todas las fechas)")
 print(tabla_2.to_string())
+
+print(f"desembolso_por_fecha_por_cohorte_por_cliente")
+tabla_3 = pd.merge(tabla_2, all_client_portfolios_by_date, on=['nro_fecha', 'cohorte'], how='inner')
+tabla_3["desembolso"] = tabla_3.apply(lambda x: x["usd_x_cuota_acum"] * x["cuotas"] * x["paga"], axis=1)
+tabla_3 = tabla_3[["nro_fecha", "fecha", "id", "cohorte", "usd_x_cuota", "usd_x_cuota_acum", "cuotas", "paga", "desembolso"]]
+tabla_3.sort_values(["nro_fecha", "id", "cohorte"],
+               axis = 0, ascending = True,
+               inplace = True)
+print(tabla_3.to_string())
+tabla_3.to_excel("desembolso_por_cliente_zdp_con_ventas.xlsx", index=False)
+sys.exit()
 
 # Finalmete, los pagos desagregados por cliente
 #zed_ops_net_by_client.rename(columns={"Cohorte": "a", "B": "c"})
@@ -125,8 +205,8 @@ desembolso_por_cliente = desembolso_por_cliente[["nro_fecha", "fecha", "cohorte"
                                                  "id", "cuotas_neto", "paga"]]
 desembolso_por_cliente["desembolso"] = desembolso_por_cliente.apply(lambda x: x["usd_x_cuota_acum"] * x["cuotas_neto"] * x ["paga"], axis=1)
 
-#desembolso_por_cliente = desembolso_por_cliente[desembolso_por_cliente["nro_fecha"] == nro_fecha].reset_index()
-#desembolso_por_cliente.drop(columns=['index'], inplace=True)
+desembolso_por_cliente = desembolso_por_cliente[desembolso_por_cliente["nro_fecha"] == nro_fecha].reset_index()
+desembolso_por_cliente.drop(columns=['index'], inplace=True)
 print(desembolso_por_cliente.head(5000).to_string())
 
-desembolso_por_cliente.to_excel("desembolso_por_cliente_zdp.xlsx")
+#desembolso_por_cliente.to_excel("desembolso_por_cliente_zdp.xlsx")
